@@ -35,6 +35,9 @@
 /* To the the UUID (found the the TA's h-file(s)) */
 #include <TEEencrypt_ta.h>
 
+#define RSA_KEY_SIZE 1024
+#define RSA_MAX_PLAIN_LEN_1024 86 // (1024/8) - 42 (padding)
+#define RSA_CIPHER_LEN_1024 (RSA_KEY_SIZE / 8)
 
 int main(int argc, char* argv[])
 {
@@ -44,11 +47,15 @@ int main(int argc, char* argv[])
 	TEEC_Operation op;
 	TEEC_UUID uuid = TA_TEEencrypt_UUID;
 	uint32_t err_origin;
+	// ceaser str	
 	int len = 64;	
 	char plaintext[64] = {0,};
 	char ciphertext[64] = {0,};
 	char encrypted_text[64] = {0,};
 	char encrypted_key[64] = {0,};
+	// rsa str
+	char clear[RSA_MAX_PLAIN_LEN_1024];
+	char ciph[RSA_CIPHER_LEN_1024];
 	
 	/* Initialize a context connecting us to the TEE */
 	res = TEEC_InitializeContext(NULL, &ctx);
@@ -80,6 +87,11 @@ int main(int argc, char* argv[])
 	 * Prepare the argument. Pass a value in the first parameter,
 	 * the remaining three parameters are unused.
 	 */
+
+	
+	// Ceaser
+	if (!strcmp(argv[3], "Ceaser")) {
+
 	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_OUTPUT, TEEC_VALUE_INOUT,
 					 TEEC_NONE, TEEC_NONE);
 	
@@ -159,7 +171,72 @@ int main(int argc, char* argv[])
 		fprintf(df, "%d", op.params[1].value.a);
 		fclose(df);
 		
+	 }
 	}
+	
+	// RSA 
+	else if (!strcmp(argv[3], "RSA")){
+		op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
+					 		TEEC_MEMREF_TEMP_OUTPUT,
+					 		TEEC_NONE, TEEC_NONE);
+	
+		op.params[0].tmpref.buffer = clear;
+		op.params[0].tmpref.size =  RSA_MAX_PLAIN_LEN_1024;
+		op.params[1].tmpref.buffer = ciph;
+		op.params[1].tmpref.size =  RSA_CIPHER_LEN_1024;
+		
+		if (!strcmp(argv[1], "-e")){		
+		// read file
+		FILE *pf = fopen(argv[2], "r");
+		if (pf == NULL){
+			printf("not found %s file\n", argv[2]);
+			return 0;		
+		}
+		fgets(clear, sizeof(clear), pf);
+		fclose(pf);
+
+		// generate key
+		res = TEEC_InvokeCommand(&sess, TA_TEEencrypt_CMD_RSA_GENKEYS, &op, &err_origin);
+		if (res != TEEC_SUCCESS)
+			errx(1, "\nTEEC_InvokeCommand(TA_RSA_CMD_GENKEYS) failed %#x\n", res);
+		
+		// encrypt		
+		res = TEEC_InvokeCommand(&sess, TA_TEEencrypt_CMD_RSA_ENC,
+				 &op, &err_origin);
+		if (res != TEEC_SUCCESS)
+			errx(1, "\nTEEC_InvokeCommand(TA_RSA_CMD_ENCRYPT) failed 0x%x origin 0x%x\n",	res, err_origin);
+		
+		// print rsa encrypted
+		memcpy(ciph, op.params[1].tmpref.buffer, len);
+		printf("RSA Encrypted : %s\n", ciph);
+
+		// save rsa encrypted file
+		FILE *ref = fopen("rsa_encrypted_file.txt", "w+");
+		fwrite(ciph, strlen(ciph), 1, ref);
+		fclose(ref);
+		
+
+		// decrypt		
+		res = TEEC_InvokeCommand(&sess, TA_TEEencrypt_CMD_RSA_DEC,
+				 &op, &err_origin);
+		if (res != TEEC_SUCCESS)
+			errx(1, "\nTEEC_InvokeCommand(TA_RSA_CMD_ENCRYPT) failed 0x%x origin 0x%x\n",	res, err_origin);
+		
+		// print rsa decrypted
+		memcpy(clear, op.params[0].tmpref.buffer, len);
+		printf("RSA Decrypted : %s\n", clear);
+
+		// save rsa decrypted file
+		FILE *rdf = fopen("rsa_decrypted_file.txt", "w+");
+		fwrite(clear, strlen(clear), 1, rdf);
+		fclose(rdf);
+		}		
+
+	}
+	else {
+		printf("No such option");
+	}
+
 
 	/*
 	 * We're done with the TA, close the session and
